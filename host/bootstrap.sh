@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-time host bootstrap for desktop-runner (Fedora/Nobara/Ubuntu-ish).
+# One-time host bootstrap for desktop-runner (Fedora/RHEL-family or Debian/Ubuntu).
 # Run on the host:  bash ~/desktop-runner/bootstrap.sh
 # Idempotent. May prompt for sudo (gh install, linger).
 set -euo pipefail

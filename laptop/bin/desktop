@@ -196,7 +196,7 @@ case "${MODE:-}" in
   --all|-a)
     while IFS= read -r line; do
       node -e 'const r=JSON.parse(process.argv[1]); const t=r.totals||{}; const i=r.implement||{}; const v=r.review||{};
-        console.log([r.ts,r.job||r.plan,"rc="+r.rc,"wall_min="+t.wall_min,"est_usd="+t.cost_usd_est,"impl="+(i.model||"—"),"rev="+(v.model||"—"),r.pr||""].join("\t"));
+        console.log([r.ts,r.job,"rc="+r.rc,"wall_min="+t.wall_min,"est_usd="+t.cost_usd_est,"impl="+(i.model||"—"),"rev="+(v.model||"—"),r.pr||""].join("\t"));
       ' "$line"
     done < "$LEDGER"
     ;;
@@ -233,7 +233,7 @@ case "${MODE:-}" in
     echo "last 10 ledger rows (API-equivalent est.):"
     tail -10 "$LEDGER" | while IFS= read -r line; do
       node -e 'const r=JSON.parse(process.argv[1]); const t=r.totals||{}; const i=r.implement||{}; const v=r.review||{};
-        console.log((r.ts||"").slice(0,19), r.job||r.plan, "wall="+t.wall_min+"m", "est=$"+t.cost_usd_est, "impl="+(i.model||"—"), "rev="+(v.model||"—"), r.pr||"");
+        console.log((r.ts||"").slice(0,19), r.job, "wall="+t.wall_min+"m", "est=$"+t.cost_usd_est, "impl="+(i.model||"—"), "rev="+(v.model||"—"), r.pr||"");
       ' "$line"
     done
     echo "tips: desktop usage --sum | desktop usage --all"

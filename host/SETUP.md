@@ -4,7 +4,7 @@ Order matters. Do these on the always-on box (or over SSH).
 
 ## 0. Prerequisites
 
-- Linux with systemd user units (Fedora, Nobara, Ubuntu, etc.)
+- Linux with systemd user units (Fedora/RHEL-family, Debian/Ubuntu, etc.)
 - `git`, `curl`, `gh` (GitHub CLI), `claude` (Claude Code CLI)
 - Node optional unless your `PREPARE_CMD` / project needs it (see `bootstrap.sh`)
 

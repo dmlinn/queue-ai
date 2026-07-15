@@ -36,8 +36,7 @@ JOB_USAGE_PREFIX=""
 
 unset ANTHROPIC_API_KEY
 
-export PATH="${HOME}/.nvm/versions/node/v20.19.5/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
-# also pick up any default nvm node
+export PATH="${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
 if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
   # shellcheck source=/dev/null
   . "${NVM_DIR:-$HOME/.nvm}/nvm.sh" 2>/dev/null || true

@@ -54,7 +54,7 @@ else
       const v=r.review||{};
       console.log(
         "  " + (r.ts||"?").slice(0,19) +
-        "  " + (r.job||r.plan||"?") +
+        "  " + (r.job||"?") +
         "  wall=" + (t.wall_min ?? "?") + "m" +
         "  est=$" + (t.cost_usd_est ?? "?") +
         "  impl=" + (i.model||"—") +
