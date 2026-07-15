@@ -1,0 +1,11 @@
+[Unit]
+Description=Drain the desktop-runner queue (serial, one job at a time)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=infinity
+# Adjust node/claude paths for your host.
+Environment=PATH=%h/.nvm/versions/node/v20.19.5/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env bash -lc '%h/desktop-runner/bin/runner.sh'

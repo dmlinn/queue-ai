@@ -1,0 +1,11 @@
+# Local host config and runtime state (never publish)
+host/config.env
+**/ledger.jsonl
+**/*.log
+.DS_Store
+*.bak
+*.bak.*
+.env
+.env.*
+credentials*
+*credentials*
