@@ -24,7 +24,7 @@ ssh_tty() {
 }
 
 cmd_help() {
-  cat <<EOF
+  cat <<'HELP'
 desktop — control an always-on Linux box from this laptop
 
 Usage:  desktop <command> [args]
@@ -39,7 +39,7 @@ Runner
   dispatch <name> [base]   Queue a job (PROMPT via stdin or flags)
   status                   Queue / service / last log / usage tail
   logs                     Follow newest runner log (Ctrl-C to stop)
-  usage [--sum|--all]      Efficiency ledger (minutes + API-est \$)
+  usage [--sum|--all]      Efficiency ledger (minutes + API-est $)
 
 Health
   doctor              Connectivity, sleep mode, runner, GPU snapshot
@@ -52,9 +52,7 @@ Help
 Examples
   desktop
   desktop doctor
-  desktop dispatch fix-readme main <<'EOF'
-PROMPT=Fix typos in README.md only. Touch no other files.
-EOF
+  desktop dispatch fix-readme main --prompt 'Fix typos in README.md only'
   desktop status
   desktop sleep
   desktop wake
@@ -63,7 +61,7 @@ Env
   DESKTOP_HOST   SSH Host alias (default: desktop)
   DESKTOP_MAC    NIC MAC for WoL (required for wake), e.g. aa:bb:cc:dd:ee:ff
   DESKTOP_BCAST  broadcast address (default: 255.255.255.255)
-EOF
+HELP
 }
 
 cmd_commands() {
@@ -100,18 +98,15 @@ cmd_dispatch() {
   while [ $# -gt 0 ]; do
     case "$1" in
       -h|--help)
-        cat <<EOF
+        cat <<'DHELP'
 Usage:
-  desktop dispatch <name> [base] <<'EOF'
-  PROMPT=Your instructions to Claude…
-  EOF
-
+  desktop dispatch <name> [base] --prompt 'one-line instructions'
   desktop dispatch <name> [base] --prompt-file path/in/repo.md
-  desktop dispatch <name> [base] --prompt 'one-line prompt'
+  desktop dispatch <name> [base]   # then type PROMPT=... on stdin
 
-Job fields written to the host queue (sourced as shell):
-  PLAN / name label, BASE, PROMPT or PROMPT_FILE, optional TITLE
-EOF
+Job fields on the host (sourced as shell):
+  PLAN (label), BASE, PROMPT or PROMPT_FILE, optional TITLE
+DHELP
         return 0
         ;;
       --prompt)
