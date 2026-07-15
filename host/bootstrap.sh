@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# One-time host bootstrap for desktop-runner (Fedora/RHEL-family or Debian/Ubuntu).
-# Run on the host:  bash ~/desktop-runner/bootstrap.sh
+# One-time host bootstrap for queue-ai (Fedora/RHEL-family or Debian/Ubuntu).
+# Run on the host:  bash ~/queue-ai/bootstrap.sh
 # Idempotent. May prompt for sudo (gh install, linger).
 set -euo pipefail
 
-ROOT="${HOME}/desktop-runner"
+ROOT="${HOME}/queue-ai"
 # shellcheck source=/dev/null
 [ -f "$ROOT/config.env" ] && source "$ROOT/config.env"
-REPO_DIR="${REPO_DIR:-$HOME/desktop-runner/repo}"
+REPO_DIR="${REPO_DIR:-$HOME/queue-ai/repo}"
 # Optional: set REPO_URL in config.env before cloning
 REPO_URL="${REPO_URL:-}"
 
@@ -68,4 +68,4 @@ loginctl enable-linger "$USER" 2>/dev/null || sudo loginctl enable-linger "$USER
 
 echo
 echo "BOOTSTRAP COMPLETE."
-echo "Next: enable systemd units (SETUP.md §5), then smoke-test from the laptop."
+echo "Next: enable systemd units (SETUP.md §5), then smoke-test from the console."

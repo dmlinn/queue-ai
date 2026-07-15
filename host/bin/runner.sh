@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# desktop-runner — drain queued jobs serially on the host.
+# queue-ai — drain queued jobs serially on the host.
 #
-# Each ~/desktop-runner/queue/*.job is sourced as shell (use printf %q when writing).
+# Each ~/queue-ai/queue/*.job is sourced as shell (use printf %q when writing).
 # Required: PROMPT  (or PROMPT_FILE relative to REPO_DIR)
 # Optional: BASE (branch), TITLE (PR title fragment), PLAN (label for logs/PRs)
 #
@@ -15,11 +15,11 @@
 # total_cost_usd in Claude JSON is an API-equivalent estimate, not subscription billing.
 set -uo pipefail
 
-ROOT="${HOME}/desktop-runner"
+ROOT="${HOME}/queue-ai"
 # shellcheck source=/dev/null
 [ -f "$ROOT/config.env" ] && source "$ROOT/config.env"
 
-REPO="${REPO_DIR:-$HOME/desktop-runner/repo}"
+REPO="${REPO_DIR:-$HOME/queue-ai/repo}"
 DEFAULT_BASE="${BASE_BRANCH:-main}"
 NTFY_URL="${NTFY_URL:-}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-5}"
@@ -299,11 +299,11 @@ EOF
   [ -n "$(git status --porcelain)" ] || return 2
 
   git add -A || return 1
-  git commit -m "auto(${LABEL}): desktop-runner" \
+  git commit -m "auto(${LABEL}): queue-ai" \
     -m "Implement-Model: ${CLAUDE_MODEL:-default}" || return 1
 
   local review_file review_body review_note usage_block
-  review_file="$(mktemp "${TMPDIR:-/tmp}/desktop-runner-review.XXXXXX.md")"
+  review_file="$(mktemp "${TMPDIR:-/tmp}/queue-ai-review.XXXXXX.md")"
   review_body=""
   review_note="skipped"
   if [ "$CLAUDE_REVIEW" = "1" ] && [ -n "$CLAUDE_REVIEW_MODEL" ]; then
@@ -345,13 +345,13 @@ Not reviewed."
   if [ -n "$TITLE_FRAG" ]; then
     title="$TITLE_FRAG"
   else
-    title="auto(${LABEL}): desktop-runner"
+    title="auto(${LABEL}): queue-ai"
   fi
   [ "$conf" = "pass" ] || title="${title} [validate FAIL]"
 
   local pr_body
   pr_body="$(cat <<EOF
-Automated **draft** from desktop-runner.
+Automated **draft** from Queue AI.
 
 | Field | Value |
 |-------|-------|

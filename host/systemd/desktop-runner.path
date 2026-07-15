@@ -1,9 +1,0 @@
-[Unit]
-Description=Watch the desktop-runner queue for new jobs
-
-[Path]
-PathExistsGlob=%h/desktop-runner/queue/*.job
-Unit=desktop-runner.service
-
-[Install]
-WantedBy=default.target

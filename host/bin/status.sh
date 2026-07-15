@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Snapshot of desktop-runner state (host-local or via laptop: desktop status).
-ROOT="${HOME}/desktop-runner"
+# Snapshot of queue-ai state (host-local or via console: qai status).
+ROOT="${HOME}/queue-ai"
 LOGS="$ROOT/logs"
 
 section() {
@@ -19,8 +19,8 @@ section "last 5 done" "$ROOT/done"
 section "last 5 failed" "$ROOT/failed"
 
 echo "== service =="
-path_st="$(systemctl --user is-active desktop-runner.path 2>/dev/null || true)"
-svc_st="$(systemctl --user is-active desktop-runner.service 2>/dev/null || true)"
+path_st="$(systemctl --user is-active qai-runner.path 2>/dev/null || true)"
+svc_st="$(systemctl --user is-active qai-runner.service 2>/dev/null || true)"
 linger="$(loginctl show-user "$USER" -p Linger --value 2>/dev/null || echo "?")"
 echo "  path unit:     ${path_st:-unknown}"
 echo "  drain service: ${svc_st:-unknown}   (active only while a job runs)"

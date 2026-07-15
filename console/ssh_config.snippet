@@ -1,10 +1,10 @@
-# Append to ~/.ssh/config on the laptop. Replace placeholders.
+# Append to ~/.ssh/config on the console machine. Replace placeholders.
 # LAN first; for remote access later, change HostName to a VPN/Tailscale name.
 
-Host desktop
+Host qai
     HostName YOUR_LAN_IP_OR_HOSTNAME
     User YOUR_LINUX_USER
-    IdentityFile ~/.ssh/id_ed25519_desktop
+    IdentityFile ~/.ssh/id_ed25519_qai
     IdentitiesOnly yes
     ServerAliveInterval 30
     ServerAliveCountMax 6

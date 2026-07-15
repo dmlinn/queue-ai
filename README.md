@@ -1,13 +1,13 @@
-# desktop-runner
+# Queue AI
 
-Laptop cockpit + always-on Linux host that runs **headless [Claude Code](https://claude.com/claude-code)** overnight (or while you’re at work), then opens a **draft pull request** for you to review.
+Console CLI + always-on Linux **host** that runs **headless [Claude Code](https://claude.com/claude-code)** from a job queue (overnight or while you work), then opens a **draft pull request** for review.
 
 ```
-laptop:  desktop dispatch …   --ssh-->   host queue (~/desktop-runner/queue/*.job)
-host:    systemd path unit --> runner drains serially:
-           git branch → Claude implement → Claude review (annotate-only)
-           → commit → push → gh pr create --draft
-laptop:  desktop status / logs / usage / sleep / wake
+console:  qai dispatch …   --ssh-->   host queue (~/queue-ai/queue/*.job)
+host:     systemd path unit --> runner drains serially:
+            git branch → Claude implement → Claude review (annotate-only)
+            → commit → push → gh pr create --draft
+console:  qai status / logs / usage / sleep / wake
 ```
 
 Nothing auto-merges. The draft PR is the human gate.
@@ -15,98 +15,112 @@ Nothing auto-merges. The draft PR is the human gate.
 ## Why
 
 - Use a **flat Claude subscription** on a machine you already leave on (or Wake-on-LAN).
-- **Two-pass models**: cheaper implement + stronger annotate-only review (rate-limit / quality tradeoff).
+- **Two-pass models**: cheaper implement + stronger annotate-only review.
 - **Git is the queue** — no second backlog system.
 - Serial jobs stay under subscription rate limits.
 
 ## Layout
 
 ```
-laptop/bin/desktop          # single CLI (type `desktop` for help)
-laptop/bin/desktop-completion.bash
-laptop/ssh_config.snippet
-host/                       # lands at ~/desktop-runner on the Linux box
+console/bin/qai                 # CLI — type `qai` for help
+console/bin/qai-completion.bash
+console/ssh_config.snippet
+host/                           # lands at ~/queue-ai on the runner host
   bootstrap.sh
   config.env.example
   SETUP.md
   bin/runner.sh
   bin/status.sh
   bin/prevent-suspend.sh
-  systemd/*.path | *.service
+  systemd/qai-runner.{path,service}
 ```
+
+## Terminology
+
+| Term | Meaning |
+|------|---------|
+| **Host** | Always-on Linux machine (queue, Claude, draft PRs) |
+| **Console** | Machine where you run `qai` (laptop, workstation, …) |
+| **`qai`** | CLI command |
 
 ## Quick start
 
-### Laptop
+### Console
 
 ```bash
-cp laptop/bin/desktop ~/bin/
-chmod +x ~/bin/desktop
+cp console/bin/qai ~/bin/
+chmod +x ~/bin/qai
 # optional tab completion
-echo 'source /path/to/desktop-runner/laptop/bin/desktop-completion.bash' >> ~/.zshrc
+echo 'source /path/to/queue-ai/console/bin/qai-completion.bash' >> ~/.zshrc
 
-# SSH: copy laptop/ssh_config.snippet into ~/.ssh/config and fill in HostName / User / key
-ssh desktop 'echo ok'
+# SSH: copy console/ssh_config.snippet into ~/.ssh/config and fill in HostName / User / key
+ssh qai 'echo ok'
 ```
 
-### Host (always-on Linux)
+### Host
 
 See [host/SETUP.md](host/SETUP.md). Summary:
 
-1. Copy `host/` → `~/desktop-runner/`
-2. `claude` authenticated on a **subscription** token (do **not** set `ANTHROPIC_API_KEY`)
-3. `gh auth login` + `bash ~/desktop-runner/bootstrap.sh`
-4. Enable user systemd path unit + linger
-5. Optional: `desktop sleep --setup` once for passwordless remote suspend
+1. Copy `host/` → `~/queue-ai/`
+2. Authenticate `claude` on a **subscription** (do **not** set `ANTHROPIC_API_KEY`)
+3. `gh auth login` + `bash ~/queue-ai/bootstrap.sh`
+4. Enable user systemd units + linger
+5. Optional: `qai sleep --setup` once for passwordless remote suspend
 
 ### Queue a job
 
-Jobs are simple env files. Minimal example:
-
 ```bash
-desktop dispatch fix-typos main <<'EOF'
-PROMPT=In this repo, fix obvious typos in README.md only. Do not change code.
-EOF
+qai dispatch fix-typos main --prompt 'Fix obvious typos in README.md only. Touch no other files.'
 ```
 
-Or use a prompt file already in the runner clone:
+Or:
 
 ```bash
-desktop dispatch my-task main --prompt-file docs/tasks/my-task.md
+qai dispatch fix-typos main <<'EOF'
+PROMPT=Fix obvious typos in README.md only. Touch no other files.
+EOF
 ```
 
 Watch:
 
 ```bash
-desktop status
-desktop logs
-desktop usage --sum
+qai status
+qai logs
+qai usage --sum
 ```
 
 ## Power
 
 | Command | Purpose |
 |---------|---------|
-| `desktop sleep` | Suspend host (prefer kernel **deep** sleep, not s2idle) |
-| `desktop wake` | Magic-packet Wake-on-LAN |
-| `desktop doctor` | SSH, sleep mode, runner, GPU snapshot |
+| `qai sleep` | Suspend host (prefer kernel **deep** sleep, not s2idle) |
+| `qai wake` | Magic-packet Wake-on-LAN |
+| `qai doctor` | SSH, sleep mode, runner, GPU snapshot |
 
 Fans spinning while “asleep” usually means `mem_sleep` is `s2idle`. Prefer `deep` (see SETUP.md).
 
-## Usage ledger
-
-Each Claude pass uses `--output-format json`. The host appends rows to `~/desktop-runner/ledger.jsonl` with wall minutes, tokens, and **API-equivalent** cost estimates. That `$` is a relative efficiency signal, not subscription billing.
+Set WoL before wake:
 
 ```bash
-desktop usage
-desktop usage --sum
+export QAI_MAC='aa:bb:cc:dd:ee:ff'
+export QAI_BCAST='255.255.255.255'   # optional; use your LAN broadcast if needed
+```
+
+
+## Usage ledger
+
+Each Claude pass uses `--output-format json`. The host appends rows to `~/queue-ai/ledger.jsonl` with wall minutes, tokens, and **API-equivalent** cost estimates (relative efficiency, not subscription billing).
+
+```bash
+qai usage
+qai usage --sum
 ```
 
 ## Security notes
 
 - Never commit API keys, OAuth tokens, or `~/.claude` credentials.
 - `config.env` is local to the host; only `config.env.example` is in git.
-- Draft PRs use whatever `gh` account is logged in on the host — treat that identity as production.
+- Draft PRs use whatever `gh` account is logged in on the host.
 - Review pass denies write tools and discards unexpected dirty trees.
 
 ## License

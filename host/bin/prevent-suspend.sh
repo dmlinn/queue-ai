@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Keep an always-on runner host from sleeping (or re-enable sleep later).
 #
-#   bash ~/desktop-runner/bin/prevent-suspend.sh          # KDE PowerDevil only
-#   bash ~/desktop-runner/bin/prevent-suspend.sh --system # also mask systemd sleep (sudo)
+#   bash ~/queue-ai/bin/prevent-suspend.sh          # KDE PowerDevil only
+#   bash ~/queue-ai/bin/prevent-suspend.sh --system # also mask systemd sleep (sudo)
 set -euo pipefail
 
 SYSTEM=0
@@ -13,7 +13,7 @@ for arg in "$@"; do
   esac
 done
 
-echo "== 1/2 desktop environment: never auto-suspend =="
+echo "== 1/2 session power settings: never auto-suspend =="
 if command -v kwriteconfig6 >/dev/null 2>&1; then
   KW=kwriteconfig6
 elif command -v kwriteconfig5 >/dev/null 2>&1; then
@@ -50,7 +50,7 @@ if [ "$SYSTEM" -eq 1 ]; then
   echo "== 2/2 systemd: mask sleep targets (sudo) =="
   sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
   sudo mkdir -p /etc/systemd/logind.conf.d
-  sudo tee /etc/systemd/logind.conf.d/desktop-runner-no-suspend.conf >/dev/null <<'EOF'
+  sudo tee /etc/systemd/logind.conf.d/queue-ai-no-suspend.conf >/dev/null <<'EOF'
 [Login]
 HandleLidSwitch=ignore
 HandleLidSwitchExternalPower=ignore

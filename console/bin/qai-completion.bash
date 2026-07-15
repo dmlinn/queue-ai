@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # source from ~/.zshrc or ~/.bashrc:
-#   source /path/to/desktop-runner/laptop/bin/desktop-completion.bash
-_desktop() {
+#   source /path/to/queue-ai/console/bin/qai-completion.bash
+_qai() {
   local cur
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
@@ -10,4 +10,4 @@ _desktop() {
     COMPREPLY=($(compgen -W "help commands doctor ping ssh sleep wake dispatch status logs usage" -- "$cur"))
   fi
 }
-complete -F _desktop desktop 2>/dev/null || true
+complete -F _qai qai 2>/dev/null || true

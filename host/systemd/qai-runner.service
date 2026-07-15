@@ -1,0 +1,11 @@
+[Unit]
+Description=Drain the Queue AI job queue (serial, one job at a time)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=infinity
+# Adjust PATH so node / claude / gh resolve (nvm, ~/.local/bin, etc.).
+Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/current/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env bash -lc '%h/queue-ai/bin/runner.sh'

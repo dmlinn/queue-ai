@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# desktop — laptop cockpit for an always-on Linux host
-#            (Claude Code overnight runner, power, health).
+# qai — console CLI for Queue AI (always-on host that runs Claude jobs from a queue).
 #
-#   desktop              list commands
-#   desktop help         same
-#   desktop <cmd> -h     help for one command
+#   qai                 list commands
+#   qai help            same
+#   qai <cmd> -h        help for one command
 #
-# Host SSH alias: DESKTOP_HOST (default: desktop)
-# WoL: set DESKTOP_MAC (and optional DESKTOP_BCAST) before using wake
+# Host SSH alias: QAI_HOST (default: qai)
+# WoL: set QAI_MAC (and optional QAI_BCAST) before using wake
 set -euo pipefail
 
-HOST="${DESKTOP_HOST:-desktop}"
-MAC="${DESKTOP_MAC:-}"
-BCAST="${DESKTOP_BCAST:-255.255.255.255}"
-RUNNER_ROOT='~/desktop-runner'
+HOST="${QAI_HOST:-qai}"
+MAC="${QAI_MAC:-}"
+BCAST="${QAI_BCAST:-255.255.255.255}"
+RUNNER_ROOT='~/queue-ai'
 
 ssh_batch() {
   ssh -o ConnectTimeout=8 -o BatchMode=yes "$HOST" "$@"
@@ -25,13 +24,13 @@ ssh_tty() {
 
 cmd_help() {
   cat <<'HELP'
-desktop — control an always-on Linux box from this laptop
+qai — Queue AI console (control an always-on runner host)
 
-Usage:  desktop <command> [args]
+Usage:  qai <command> [args]
 
 Power
   sleep [--setup|--force|--keep-mask|--interactive]
-                      Suspend the machine (prefer deep S3, not s2idle)
+                      Suspend the host (prefer deep S3, not s2idle)
   wake [--no-wait]    Wake-on-LAN (magic packet) and wait for SSH
   ssh [args...]       Interactive SSH (pass-through)
 
@@ -50,17 +49,17 @@ Help
   commands            Subcommand names only
 
 Examples
-  desktop
-  desktop doctor
-  desktop dispatch fix-readme main --prompt 'Fix typos in README.md only'
-  desktop status
-  desktop sleep
-  desktop wake
+  qai
+  qai doctor
+  qai dispatch fix-readme main --prompt 'Fix typos in README.md only'
+  qai status
+  qai sleep
+  qai wake
 
 Env
-  DESKTOP_HOST   SSH Host alias (default: desktop)
-  DESKTOP_MAC    NIC MAC for WoL (required for wake), e.g. aa:bb:cc:dd:ee:ff
-  DESKTOP_BCAST  broadcast address (default: 255.255.255.255)
+  QAI_HOST   SSH Host alias (default: qai)
+  QAI_MAC    NIC MAC for WoL (required for wake), e.g. aa:bb:cc:dd:ee:ff
+  QAI_BCAST  broadcast address (default: 255.255.255.255)
 HELP
 }
 
@@ -76,7 +75,7 @@ cmd_ping() {
     echo "up  ($HOST)"
     return 0
   fi
-  echo "down ($HOST) — try: desktop wake"
+  echo "down ($HOST) — try: qai wake"
   return 1
 }
 
@@ -100,9 +99,9 @@ cmd_dispatch() {
       -h|--help)
         cat <<'DHELP'
 Usage:
-  desktop dispatch <name> [base] --prompt 'one-line instructions'
-  desktop dispatch <name> [base] --prompt-file path/in/repo.md
-  desktop dispatch <name> [base]   # then type PROMPT=... on stdin
+  qai dispatch <name> [base] --prompt 'one-line instructions'
+  qai dispatch <name> [base] --prompt-file path/in/repo.md
+  qai dispatch <name> [base]   # then type PROMPT=... on stdin
 
 Job fields on the host (sourced as shell):
   PLAN (label), BASE, PROMPT or PROMPT_FILE, optional TITLE
@@ -137,18 +136,12 @@ DHELP
   name="${rest[0]:-}"
   base="${rest[1]:-main}"
   if [ -z "$name" ]; then
-    echo "Usage: desktop dispatch <name> [base]  (see desktop dispatch -h)" >&2
+    echo "Usage: qai dispatch <name> [base]  (see qai dispatch -h)" >&2
     return 1
   fi
 
-  # stdin PROMPT if not given via flags and stdin is not a tty
   if [ -z "$prompt" ] && [ -z "$prompt_file" ] && [ ! -t 0 ]; then
     prompt="$(cat)"
-    # allow full job body on stdin (PLAN= already known); if it looks like KEY=
-    if [[ "$prompt" != PROMPT=* && "$prompt" != *"PROMPT="* ]]; then
-      # plain text → wrap
-      :
-    fi
   fi
 
   local queued_at queued_by part job_body
@@ -160,9 +153,7 @@ DHELP
     job_body="$(printf 'PLAN=%q\nBASE=%q\nPROMPT_FILE=%q\nTITLE=%q\nQUEUED_AT=%q\nQUEUED_BY=%q\n' \
       "$name" "$base" "$prompt_file" "$title" "$queued_at" "$queued_by")"
   elif [ -n "$prompt" ]; then
-    # If stdin was a full job file with PROMPT=..., pass through carefully
     if [[ "$prompt" == PROMPT=* || "$prompt" == *$'\n'PROMPT=* ]]; then
-      # User supplied KEY=value body; ensure PLAN/BASE present
       job_body="$(printf 'PLAN=%q\nBASE=%q\nQUEUED_AT=%q\nQUEUED_BY=%q\n' \
         "$name" "$base" "$queued_at" "$queued_by")"
       job_body+=$'\n'"$prompt"
@@ -180,14 +171,14 @@ DHELP
 
   ssh_batch "mkdir -p $RUNNER_ROOT/queue && cat > $RUNNER_ROOT/queue/${part} && mv $RUNNER_ROOT/queue/${part} $RUNNER_ROOT/queue/${name}.job" <<<"$job_body"
   echo "queued '${name}' (base=${base}) → ${HOST}"
-  echo "watch: desktop status  |  desktop logs"
+  echo "watch: qai status  |  qai logs"
 }
 
 cmd_usage() {
   local mode="${1:-}"
   # shellcheck disable=SC2029
   ssh_batch "MODE=$(printf %q "$mode") bash -s" <<'REMOTE'
-LEDGER="$HOME/desktop-runner/ledger.jsonl"
+LEDGER="$HOME/queue-ai/ledger.jsonl"
 if [ ! -f "$LEDGER" ]; then
   echo "no ledger yet at $LEDGER"
   exit 0
@@ -228,7 +219,7 @@ case "${MODE:-}" in
       console.log("(est. \$ is API-equivalent, not subscription billing)");
     ' "$LEDGER"
     ;;
-  -h|--help) echo "Usage: desktop usage [--sum|--all]" ;;
+  -h|--help) echo "Usage: qai usage [--sum|--all]" ;;
   *)
     echo "last 10 ledger rows (API-equivalent est.):"
     tail -10 "$LEDGER" | while IFS= read -r line; do
@@ -236,7 +227,7 @@ case "${MODE:-}" in
         console.log((r.ts||"").slice(0,19), r.job, "wall="+t.wall_min+"m", "est=$"+t.cost_usd_est, "impl="+(i.model||"—"), "rev="+(v.model||"—"), r.pr||"");
       ' "$line"
     done
-    echo "tips: desktop usage --sum | desktop usage --all"
+    echo "tips: qai usage --sum | qai usage --all"
     ;;
 esac
 REMOTE
@@ -248,15 +239,15 @@ cmd_wake() {
     case "$arg" in
       --no-wait|-n) wait=0 ;;
       -h|--help)
-        echo "Usage: desktop wake [--no-wait]"
-        echo "Requires DESKTOP_MAC (magic packet only — not random LAN traffic)."
+        echo "Usage: qai wake [--no-wait]"
+        echo "Requires QAI_MAC (magic packet only — not random LAN traffic)."
         return 0
         ;;
     esac
   done
 
   if [ -z "$MAC" ]; then
-    echo "Set DESKTOP_MAC=aa:bb:cc:dd:ee:ff (host NIC MAC) before wake." >&2
+    echo "Set QAI_MAC=aa:bb:cc:dd:ee:ff (host NIC MAC) before wake." >&2
     return 1
   fi
 
@@ -291,7 +282,7 @@ PY
   for _ in $(seq 1 30); do
     if ssh -o ConnectTimeout=2 -o BatchMode=yes "$HOST" 'echo awake' 2>/dev/null; then
       echo
-      echo "desktop is up"
+      echo "host is up"
       return 0
     fi
     echo -n "."
@@ -311,13 +302,13 @@ cmd_sleep() {
       --setup|--allow-passwordless) setup=1 ;;
       --interactive|-i) interactive=1 ;;
       -h|--help)
-        cat <<EOF
-Usage: desktop sleep [options]
+        cat <<'SHELP'
+Usage: qai sleep [options]
   --setup         install polkit rule for passwordless remote suspend
   --force         sleep even if runner has jobs
   --keep-mask     do not unmask suspend.target
   --interactive   ssh -t + systemctl suspend
-EOF
+SHELP
         return 0
         ;;
     esac
@@ -333,10 +324,10 @@ EOF
     ssh_tty 'bash -s' <<'REMOTE'
 set -euo pipefail
 USER_NAME="$(id -un)"
-RULE="/etc/polkit-1/rules.d/49-desktop-runner-suspend.rules"
+RULE="/etc/polkit-1/rules.d/49-qai-runner-suspend.rules"
 TMP="$(mktemp)"
 cat >"$TMP" <<EOF
-// desktop-runner — allow ${USER_NAME} suspend/hibernate without interactive polkit
+// queue-ai — allow ${USER_NAME} suspend/hibernate without interactive polkit
 polkit.addRule(function(action, subject) {
     if (subject.user !== "${USER_NAME}") return;
     var ids = [
@@ -352,7 +343,7 @@ sudo install -m 644 "$TMP" "$RULE"
 rm -f "$TMP"
 sudo systemctl reload polkit 2>/dev/null || true
 busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanSuspend
-echo "Done. Try: desktop sleep"
+echo "Done. Try: qai sleep"
 REMOTE
     return 0
   fi
@@ -360,8 +351,8 @@ REMOTE
   if [ "$force" -eq 0 ]; then
     local busy nq nr
     busy="$(ssh_batch '
-      q=$(ls -A ~/desktop-runner/queue 2>/dev/null | wc -l)
-      r=$(ls -A ~/desktop-runner/running 2>/dev/null | wc -l)
+      q=$(ls -A ~/queue-ai/queue 2>/dev/null | wc -l)
+      r=$(ls -A ~/queue-ai/running 2>/dev/null | wc -l)
       echo "$q $r"
     ')"
     read -r nq nr <<<"$busy"
@@ -398,7 +389,7 @@ REMOTE
     case "$can" in
       *yes*) do_batch || true ;;
       *challenge*|*auth*)
-        echo "polkit needs auth — desktop sleep --setup once, or --interactive"
+        echo "polkit needs auth — qai sleep --setup once, or --interactive"
         [ -t 0 ] && do_interactive || return 1
         ;;
       *no*) echo "suspend not available"; return 1 ;;
@@ -413,13 +404,13 @@ REMOTE
     echo "still reachable — suspend did not stick."
     return 1
   fi
-  echo "desktop is asleep. Wake with: desktop wake"
+  echo "host is asleep. Wake with: qai wake"
 }
 
 cmd_doctor() {
-  echo "== desktop doctor ($HOST) =="
+  echo "== qai doctor ($HOST) =="
   if ! ssh_batch 'true' 2>/dev/null; then
-    echo "SSH:        DOWN  — try: desktop wake"
+    echo "SSH:        DOWN  — try: qai wake"
     return 1
   fi
   echo "SSH:        up"
@@ -431,17 +422,17 @@ echo -n "mem_sleep:  "; cat /sys/power/mem_sleep 2>/dev/null
 echo "            (want [deep] for quiet fans; s2idle keeps hardware warm)"
 echo -n "suspend:    "; systemctl is-enabled suspend.target 2>&1
 echo -n "linger:     "; loginctl show-user "$USER" -p Linger --value 2>/dev/null
-echo -n "runner path:"; systemctl --user is-active desktop-runner.path 2>/dev/null
-echo -n "runner svc: "; systemctl --user is-active desktop-runner.service 2>/dev/null
+echo -n "runner path:"; systemctl --user is-active qai-runner.path 2>/dev/null
+echo -n "runner svc: "; systemctl --user is-active qai-runner.service 2>/dev/null
 echo -n "CanSuspend: "; busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanSuspend 2>/dev/null
 echo -n "claude:     "; command -v claude >/dev/null && claude --version 2>/dev/null | head -1 || echo missing
 echo -n "gh:         "; gh auth status 2>&1 | head -1
-echo -n "queue:      "; ls ~/desktop-runner/queue 2>/dev/null | wc -l | tr -d ' '; echo " pending"
+echo -n "queue:      "; ls ~/queue-ai/queue 2>/dev/null | wc -l | tr -d ' '; echo " pending"
 if command -v nvidia-smi >/dev/null; then
   nvidia-smi --query-gpu=name,power.draw,temperature.gpu,fan.speed --format=csv,noheader 2>/dev/null | sed 's/^/gpu:        /'
 fi
 REMOTE
-  echo "WoL MAC:    ${MAC:-"(set DESKTOP_MAC)"}"
+  echo "WoL MAC:    ${MAC:-"(set QAI_MAC)"}"
 }
 
 main() {
@@ -464,7 +455,7 @@ main() {
     usage)    cmd_usage "$@" ;;
     *)
       echo "unknown command: $cmd" >&2
-      echo "Run: desktop" >&2
+      echo "Run: qai" >&2
       return 1
       ;;
   esac

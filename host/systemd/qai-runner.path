@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch the Queue AI job queue for new jobs
+
+[Path]
+PathExistsGlob=%h/queue-ai/queue/*.job
+Unit=qai-runner.service
+
+[Install]
+WantedBy=default.target
