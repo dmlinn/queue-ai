@@ -500,8 +500,9 @@ for job in "$QUEUE"/*.job; do
   # Normal-looking branch: "<type>/<label>" (e.g. chore/platform-production-floor-skeleton),
   # no "auto/" prefix and no run timestamp. TYPE defaults to chore (job-overridable).
   branch="${TYPE:-chore}/${local_label}"
-  # sanitize branch name lightly
-  branch="$(echo "$branch" | tr -c 'A-Za-z0-9._/-' '-' | sed 's/--*/-/g')"
+  # sanitize: map disallowed chars to '-', collapse runs, strip leading/trailing '-'.
+  # Use printf (not echo) so a trailing newline isn't turned into a stray '-' by tr.
+  branch="$(printf '%s' "$branch" | tr -c 'A-Za-z0-9._/-' '-' | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
 
   echo "$(date -u +%FT%TZ) start job=$local_label mode=$job_mode base=$BASE branch=$branch" >>"$logf"
   process_job "$local_label" "$BASE" "$branch" "$PROMPT" "$TITLE" "$job_mode" "$PLAN" >>"$logf" 2>&1
