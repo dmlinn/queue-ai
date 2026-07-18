@@ -5,12 +5,14 @@ Console CLI + always-on Linux **host** that runs **headless [Claude Code](https:
 ```
 console:  qai dispatch …   --ssh-->   host queue (~/queue-ai/queue/*.job)
 host:     systemd path unit --> runner drains serially:
-            git branch → Claude implement → Claude review (annotate-only)
-            → commit → push → gh pr create --draft
+            git branch (<type>/<slug>) → Claude implement → Claude review
+            (annotate-only) → commit → push → gh pr create --draft
 console:  qai status / logs / usage / sleep / wake
 ```
 
-Nothing auto-merges. The draft PR is the human gate.
+Nothing auto-merges. The draft PR is the human gate. Branches and PR titles use
+plain conventional-commit form (`chore/<slug>`, `chore: <subject>`) — no runner
+watermark — so they read like hand-made work.
 
 ## Why
 
@@ -81,6 +83,13 @@ PROMPT=Fix obvious typos in README.md only. Touch no other files.
 EOF
 ```
 
+Set the conventional-commit type for the branch and title (defaults to `chore`):
+
+```bash
+qai dispatch fix-typos main --type fix --prompt 'Fix typos in README.md only.'
+# → branch fix/fix-typos, title "fix: fix typos"
+```
+
 Watch:
 
 ```bash
@@ -89,15 +98,30 @@ qai logs
 qai usage --sum
 ```
 
+### Modes
+
+A job runs in one of two modes:
+
+- **Generic** (any repo) — pass `--prompt`/`--prompt-file`; the text is handed to
+  Claude directly. No project tooling is assumed.
+- **Packet** (opt-in reference integration) — pass a plan slug and *no* prompt (or
+  `--packet`). The runner compiles a work order in the fresh clone and gates the
+  result before pushing. The default commands are wired for a plans-as-code repo
+  (`pnpm plan:readiness` / `plan:packet` / `plan:conformance`); swap them in
+  `host/bin/runner.sh` for your own toolchain.
+
 ## Power
 
 | Command | Purpose |
 |---------|---------|
 | `qai sleep` | Suspend host (prefer kernel **deep** sleep, not s2idle) |
+| `qai sleep --when-idle` | Arm: runner suspends the host once it drains the queue |
 | `qai wake` | Magic-packet Wake-on-LAN |
 | `qai doctor` | SSH, sleep mode, runner, GPU snapshot |
 
-Fans spinning while “asleep” usually means `mem_sleep` is `s2idle`. Prefer `deep` (see SETUP.md).
+`qai dispatch` auto-wakes a sleeping host (WoL) before queuing, so it pairs with
+`--when-idle`: nap between batches, wake on the next job. Fans spinning while
+“asleep” usually means `mem_sleep` is `s2idle`. Prefer `deep` (see SETUP.md).
 
 Set WoL before wake:
 

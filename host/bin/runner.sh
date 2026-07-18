@@ -2,11 +2,18 @@
 # queue-ai — drain queued jobs serially on the host.
 #
 # Each ~/queue-ai/queue/*.job is sourced as shell (use printf %q when writing).
-# Required: PROMPT  (or PROMPT_FILE relative to REPO_DIR)
+# Two modes:
+#   generic — job sets PROMPT (or PROMPT_FILE relative to REPO_DIR): that text is
+#             the implement instruction. For any project (e.g. a Jira client).
+#   packet  — job sets PLAN (a SAS plan slug) and NO PROMPT (or PACKET=1): the
+#             runner runs `pnpm plan:readiness` + `plan:packet` in the fresh clone,
+#             builds the implement prompt from the compiled packet.json, and gates
+#             with `pnpm plan:conformance`. This is the SAS seeds/paradigm path.
 # Optional: BASE (branch), TITLE (PR title fragment), PLAN (label for logs/PRs)
 #
-# Pipeline: checkout base → optional PREPARE_CMD → Claude implement → commit →
-#           Claude review (annotate-only) → optional VALIDATE_CMD → push → draft PR
+# Pipeline: checkout base → optional PREPARE_CMD → [packet: readiness+compile] →
+#           Claude implement → commit → Claude review (annotate-only) →
+#           VALIDATE_CMD / [packet: plan:conformance] → push → draft PR
 #
 # Usage artifacts:
 #   logs/<job>.implement.json | .review.json
@@ -267,7 +274,9 @@ EOF
 
 # Return: 0 PR+ok, 2 no changes, 3 PR but validate failed, 1 hard fail
 process_job() {
-  local LABEL="$1" BASE="$2" branch="$3" PROMPT_TEXT="$4" TITLE_FRAG="$5"
+  local LABEL="$1" BASE="$2" branch="$3" PROMPT_TEXT="$4" TITLE_FRAG="$5" MODE="${6:-generic}" PLAN_SLUG="${7:-}"
+  local effective_validate="$VALIDATE_CMD"
+  local PACKET_TITLE=""
   cd "$REPO" || return 1
   if [ -z "$(git config user.email 2>/dev/null)" ]; then
     echo "git user.email unset in $REPO" >&2
@@ -281,6 +290,47 @@ process_job() {
   if [ -n "$PREPARE_CMD" ]; then
     echo "prepare: $PREPARE_CMD"
     bash -lc "$PREPARE_CMD" || return 1
+  fi
+
+  # SAS packet mode: compile the plan packet in the fresh clone and build the
+  # implement prompt from it; use plan:conformance as the validate gate.
+  if [ "$MODE" = "packet" ]; then
+    echo "packet: plan=${PLAN_SLUG} (readiness + compile)"
+    pnpm -s plan:readiness -- "$PLAN_SLUG" || { echo "packet: readiness failed for ${PLAN_SLUG}" >&2; return 1; }
+    pnpm -s plan:packet    -- "$PLAN_SLUG" || { echo "packet: compile failed for ${PLAN_SLUG}" >&2; return 1; }
+    local packet=".temp/agent-os/packets/${PLAN_SLUG}/packet.json"
+    [ -f "$packet" ] || { echo "packet: ${packet} missing" >&2; return 1; }
+    PROMPT_TEXT="$(node -e '
+      const p = require(require("path").resolve(process.argv[1]));
+      const list = (a) => (Array.isArray(a) && a.length) ? a.map((x) => "- " + x).join("\n") : "- (none listed)";
+      process.stdout.write([
+        p.workOrder || "",
+        "",
+        "Acceptance criteria (all must be satisfied):",
+        list(p.acceptanceCriteria),
+        "",
+        "Allowed paths — edit ONLY within these:",
+        list(p.allowedPaths),
+        "",
+        "Disallowed paths — never modify:",
+        list(p.disallowedPaths),
+        "",
+        "Explicit non-goals:",
+        list(p.explicitNonGoals),
+        "",
+        "Stop conditions — abort and make no further edits if any is hit:",
+        list(p.stopConditions),
+        "",
+        "Plan-Slug: " + (p.slug || ""),
+        "Packet-Hash: " + (p.packetHash || ""),
+      ].join("\n"));
+    ' "$packet")" || { echo "packet: prompt build failed" >&2; return 1; }
+    PACKET_TITLE="$(node -e 'process.stdout.write((require(require("path").resolve(process.argv[1])).title)||"")' "$packet" 2>/dev/null || true)"
+    if [ -n "$effective_validate" ]; then
+      effective_validate="${effective_validate} && pnpm -s plan:conformance -- ${PLAN_SLUG} --base origin/${BASE} --head HEAD"
+    else
+      effective_validate="pnpm -s plan:conformance -- ${PLAN_SLUG} --base origin/${BASE} --head HEAD"
+    fi
   fi
 
   local prompt
@@ -298,8 +348,24 @@ EOF
 
   [ -n "$(git status --porcelain)" ] || return 2
 
+  # Normalized, conventional-commit title: "<type>: <subject>" — no "auto"/"queue-ai"
+  # machine markers. TYPE defaults to chore (overridable via the job's TYPE field).
+  # Subject prefers the packet's real plan title (SAS mode); else the humanized label.
+  local job_type subject title
+  job_type="${TYPE:-chore}"
+  if [ -n "$TITLE_FRAG" ]; then
+    title="$TITLE_FRAG"
+  else
+    if [ "$MODE" = "packet" ] && [ -n "${PACKET_TITLE:-}" ]; then
+      subject="$PACKET_TITLE"
+    else
+      subject="$(printf '%s' "$LABEL" | tr '-' ' ')"
+    fi
+    title="${job_type}: ${subject}"
+  fi
+
   git add -A || return 1
-  git commit -m "auto(${LABEL}): queue-ai" \
+  git commit -m "$title" \
     -m "Implement-Model: ${CLAUDE_MODEL:-default}" || return 1
 
   local review_file review_body review_note usage_block
@@ -334,20 +400,18 @@ Not reviewed."
   [ -n "${JOB_USAGE_PREFIX:-}" ] && usage_block="$(usage_markdown "$JOB_USAGE_PREFIX" 2>/dev/null || true)"
 
   local conf="pass"
-  if [ -n "$VALIDATE_CMD" ]; then
-    echo "validate: $VALIDATE_CMD"
-    bash -lc "$VALIDATE_CMD" || conf="FAIL"
+  if [ -n "$effective_validate" ]; then
+    echo "validate: $effective_validate"
+    bash -lc "$effective_validate" || conf="FAIL"
   fi
 
-  git push -u origin "$branch" || return 1
+  # Clean branch names carry no run timestamp, so a re-dispatch reuses the branch;
+  # force-with-lease updates it safely (won't clobber a divergent remote push).
+  git push -u --force-with-lease origin "$branch" || return 1
 
-  local title
-  if [ -n "$TITLE_FRAG" ]; then
-    title="$TITLE_FRAG"
-  else
-    title="auto(${LABEL}): queue-ai"
-  fi
-  [ "$conf" = "pass" ] || title="${title} [validate FAIL]"
+  # title was computed before the commit; only the validate-fail marker is late.
+  local pr_title="$title"
+  [ "$conf" = "pass" ] || pr_title="${pr_title} [validate FAIL]"
 
   local pr_body
   pr_body="$(cat <<EOF
@@ -371,8 +435,17 @@ ${review_body}
 EOF
 )"
 
-  gh pr create --draft --base "$BASE" --head "$branch" --title "$title" \
-    --body "$pr_body" || return 1
+  # Reuse an open PR for this branch if one already exists (re-dispatch of the same
+  # plan): the force-push already updated it, so just refresh its title/body.
+  local existing_pr
+  existing_pr="$(gh pr list --head "$branch" --state open --json url --jq '.[0].url' 2>/dev/null || true)"
+  if [ -n "$existing_pr" ]; then
+    echo "PR exists for ${branch} (updated via force-push): ${existing_pr}"
+    gh pr edit "$existing_pr" --title "$pr_title" --body "$pr_body" || true
+  else
+    gh pr create --draft --base "$BASE" --head "$branch" --title "$pr_title" \
+      --body "$pr_body" || return 1
+  fi
 
   [ "$conf" = "pass" ] || return 3
   return 0
@@ -386,7 +459,7 @@ for job in "$QUEUE"/*.job; do
   JOB_USAGE_PREFIX="$LOGS/${name}-${ts}"
   mv "$job" "$RUNNING/${name}.job"; job="$RUNNING/${name}.job"
 
-  PLAN=""; PROMPT=""; PROMPT_FILE=""; BASE="$DEFAULT_BASE"; TITLE=""
+  PLAN=""; PROMPT=""; PROMPT_FILE=""; BASE="$DEFAULT_BASE"; TITLE=""; PACKET=""; TYPE=""
   # shellcheck source=/dev/null
   source "$job"
   local_label="${PLAN:-$name}"
@@ -395,18 +468,30 @@ for job in "$QUEUE"/*.job; do
       PROMPT="$(cat "$REPO/$PROMPT_FILE")"
     fi
   }
-  if [ -z "${PROMPT:-}" ]; then
-    echo "$(date -u +%FT%TZ) FAIL no PROMPT or PROMPT_FILE in job" >>"$logf"
-    mv "$job" "$FAILED/${name}.job"
-    continue
+  # Mode: an explicit prompt runs generic (any project, e.g. a Jira client). No
+  # prompt but a PLAN slug runs SAS packet mode — plan:readiness + plan:packet
+  # compile the work order and plan:conformance gates it. PACKET=1 forces it.
+  job_mode="generic"
+  if [ "${PACKET:-}" = "1" ] && [ -n "${PLAN:-}" ]; then
+    job_mode="packet"
+  elif [ -z "${PROMPT:-}" ]; then
+    if [ -n "${PLAN:-}" ]; then
+      job_mode="packet"
+    else
+      echo "$(date -u +%FT%TZ) FAIL no PROMPT/PROMPT_FILE and no PLAN in job" >>"$logf"
+      mv "$job" "$FAILED/${name}.job"
+      continue
+    fi
   fi
 
-  branch="auto/${local_label}-${ts}"
+  # Normal-looking branch: "<type>/<label>" (e.g. chore/platform-production-floor-skeleton),
+  # no "auto/" prefix and no run timestamp. TYPE defaults to chore (job-overridable).
+  branch="${TYPE:-chore}/${local_label}"
   # sanitize branch name lightly
   branch="$(echo "$branch" | tr -c 'A-Za-z0-9._/-' '-' | sed 's/--*/-/g')"
 
-  echo "$(date -u +%FT%TZ) start job=$local_label base=$BASE branch=$branch" >>"$logf"
-  process_job "$local_label" "$BASE" "$branch" "$PROMPT" "$TITLE" >>"$logf" 2>&1
+  echo "$(date -u +%FT%TZ) start job=$local_label mode=$job_mode base=$BASE branch=$branch" >>"$logf"
+  process_job "$local_label" "$BASE" "$branch" "$PROMPT" "$TITLE" "$job_mode" "$PLAN" >>"$logf" 2>&1
   rc=$?
   url="$(grep -oiE 'https://github\.com/[^ ]+/pull/[0-9]+' "$logf" | tail -n1)"
 
@@ -422,3 +507,16 @@ for job in "$QUEUE"/*.job; do
   cd "$REPO" && git checkout "$DEFAULT_BASE" >/dev/null 2>&1 || true
   echo "$(date -u +%FT%TZ) end job=$local_label rc=$rc" >>"$logf"
 done
+
+# Auto-sleep when idle: if armed (sentinel present) AND the queue is now empty,
+# suspend the host. One-shot (sentinel removed). Requires passwordless suspend
+# (run `qai sleep --setup` once) or it logs the failure and stays awake.
+if [ -f "$ROOT/sleep-when-idle" ]; then
+  pending=("$QUEUE"/*.job)
+  if [ "${#pending[@]}" -eq 0 ]; then
+    rm -f "$ROOT/sleep-when-idle"
+    echo "$(date -u +%FT%TZ) queue drained + sleep armed -> suspend" >>"$LOGS/sleep.log"
+    systemctl suspend >>"$LOGS/sleep.log" 2>&1 \
+      || echo "$(date -u +%FT%TZ) suspend FAILED — run 'qai sleep --setup' once for passwordless suspend" >>"$LOGS/sleep.log"
+  fi
+fi
