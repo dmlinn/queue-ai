@@ -5,15 +5,17 @@
 # Two modes:
 #   generic — job sets PROMPT (or PROMPT_FILE relative to REPO_DIR): that text is
 #             the implement instruction. For any project (e.g. a Jira client).
-#   packet  — job sets PLAN (a SAS plan slug) and NO PROMPT (or PACKET=1): the
-#             runner runs `pnpm plan:readiness` + `plan:packet` in the fresh clone,
-#             builds the implement prompt from the compiled packet.json, and gates
-#             with `pnpm plan:conformance`. This is the SAS seeds/paradigm path.
+#   packet  — job sets PLAN (a plan slug) and NO PROMPT (or PACKET=1): the runner
+#             runs PACKET_COMPILE_CMD in the fresh clone, builds the implement
+#             prompt from the compiled PACKET_JSON_PATH, and gates the result with
+#             PACKET_CONFORMANCE_CMD. Those three config vars default to a
+#             plans-as-code toolchain (`pnpm plan:readiness`/`plan:packet`/
+#             `plan:conformance`); override them in config.env for your own.
 # Optional: BASE (branch), TITLE (PR title fragment), PLAN (label for logs/PRs)
 #
-# Pipeline: checkout base → optional PREPARE_CMD → [packet: readiness+compile] →
+# Pipeline: checkout base → optional PREPARE_CMD → [packet: PACKET_COMPILE_CMD] →
 #           Claude implement → commit → Claude review (annotate-only) →
-#           VALIDATE_CMD / [packet: plan:conformance] → push → draft PR
+#           VALIDATE_CMD / [packet: PACKET_CONFORMANCE_CMD] → push → draft PR
 #
 # Usage artifacts:
 #   logs/<job>.implement.json | .review.json
@@ -292,13 +294,24 @@ process_job() {
     bash -lc "$PREPARE_CMD" || return 1
   fi
 
-  # SAS packet mode: compile the plan packet in the fresh clone and build the
-  # implement prompt from it; use plan:conformance as the validate gate.
+  # Packet mode: compile a work order in the fresh clone, build the implement
+  # prompt from it, and gate the result before pushing. The three project-specific
+  # touchpoints are config-driven (config.env), with plans-as-code defaults.
+  # Placeholders: {slug} = plan slug, {base} = base branch.
   if [ "$MODE" = "packet" ]; then
-    echo "packet: plan=${PLAN_SLUG} (readiness + compile)"
-    pnpm -s plan:readiness -- "$PLAN_SLUG" || { echo "packet: readiness failed for ${PLAN_SLUG}" >&2; return 1; }
-    pnpm -s plan:packet    -- "$PLAN_SLUG" || { echo "packet: compile failed for ${PLAN_SLUG}" >&2; return 1; }
-    local packet=".temp/agent-os/packets/${PLAN_SLUG}/packet.json"
+    # Defaults are assigned separately (not via ${VAR:-…}) because a literal "}"
+    # in the {slug} placeholder would otherwise close the parameter expansion early.
+    local compile_cmd="${PACKET_COMPILE_CMD:-}" packet_path="${PACKET_JSON_PATH:-}" conf_cmd="${PACKET_CONFORMANCE_CMD:-}"
+    [ -n "$compile_cmd" ] || compile_cmd='pnpm -s plan:readiness -- {slug} && pnpm -s plan:packet -- {slug}'
+    [ -n "$packet_path" ] || packet_path='.temp/agent-os/packets/{slug}/packet.json'
+    [ -n "$conf_cmd" ]    || conf_cmd='pnpm -s plan:conformance -- {slug} --base origin/{base} --head HEAD'
+    compile_cmd="${compile_cmd//\{slug\}/$PLAN_SLUG}"; compile_cmd="${compile_cmd//\{base\}/$BASE}"
+    packet_path="${packet_path//\{slug\}/$PLAN_SLUG}"; packet_path="${packet_path//\{base\}/$BASE}"
+    conf_cmd="${conf_cmd//\{slug\}/$PLAN_SLUG}";       conf_cmd="${conf_cmd//\{base\}/$BASE}"
+
+    echo "packet: plan=${PLAN_SLUG} compile: ${compile_cmd}"
+    bash -lc "$compile_cmd" || { echo "packet: compile failed for ${PLAN_SLUG}" >&2; return 1; }
+    local packet="$packet_path"
     [ -f "$packet" ] || { echo "packet: ${packet} missing" >&2; return 1; }
     PROMPT_TEXT="$(node -e '
       const p = require(require("path").resolve(process.argv[1]));
@@ -327,9 +340,9 @@ process_job() {
     ' "$packet")" || { echo "packet: prompt build failed" >&2; return 1; }
     PACKET_TITLE="$(node -e 'process.stdout.write((require(require("path").resolve(process.argv[1])).title)||"")' "$packet" 2>/dev/null || true)"
     if [ -n "$effective_validate" ]; then
-      effective_validate="${effective_validate} && pnpm -s plan:conformance -- ${PLAN_SLUG} --base origin/${BASE} --head HEAD"
+      effective_validate="${effective_validate} && ${conf_cmd}"
     else
-      effective_validate="pnpm -s plan:conformance -- ${PLAN_SLUG} --base origin/${BASE} --head HEAD"
+      effective_validate="${conf_cmd}"
     fi
   fi
 

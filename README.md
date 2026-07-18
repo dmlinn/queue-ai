@@ -107,8 +107,9 @@ A job runs in one of two modes:
 - **Packet** (opt-in reference integration) — pass a plan slug and *no* prompt (or
   `--packet`). The runner compiles a work order in the fresh clone and gates the
   result before pushing. The default commands are wired for a plans-as-code repo
-  (`pnpm plan:readiness` / `plan:packet` / `plan:conformance`); swap them in
-  `host/bin/runner.sh` for your own toolchain.
+  (`pnpm plan:readiness` / `plan:packet` / `plan:conformance`); override
+  `PACKET_COMPILE_CMD` / `PACKET_JSON_PATH` / `PACKET_CONFORMANCE_CMD` in
+  `config.env` (placeholders `{slug}`, `{base}`) for your own toolchain.
 
 ## Power
 
