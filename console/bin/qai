@@ -92,19 +92,25 @@ cmd_logs() {
 }
 
 cmd_dispatch() {
-  local name="" base="main" prompt="" prompt_file="" title=""
+  local name="" base="main" prompt="" prompt_file="" title="" packet="" type=""
   local -a rest=()
   while [ $# -gt 0 ]; do
     case "$1" in
       -h|--help)
         cat <<'DHELP'
 Usage:
-  qai dispatch <name> [base] --prompt 'one-line instructions'
+  qai dispatch <slug> [base]                 # SAS packet mode (plan:readiness+packet+conformance)
+  qai dispatch <slug> [base] --packet        # force packet mode
+  qai dispatch <name> [base] --prompt 'one-line instructions'   # generic (any project)
   qai dispatch <name> [base] --prompt-file path/in/repo.md
-  qai dispatch <name> [base]   # then type PROMPT=... on stdin
+  qai dispatch <name> [base]   # then type PROMPT=... on stdin (generic)
 
+Modes: no prompt + a SAS plan slug → packet mode; a prompt → generic.
+Branch/commit: <type>/<slug> and "<type>: <subject>" (type defaults to chore).
+  --type <t>   conventional-commit type for the branch + title (feat/fix/chore/plan)
+  --title <s>  full PR/commit title override (wins over --type)
 Job fields on the host (sourced as shell):
-  PLAN (label), BASE, PROMPT or PROMPT_FILE, optional TITLE
+  PLAN (slug/label), BASE, PACKET, PROMPT or PROMPT_FILE, optional TITLE, TYPE
 DHELP
         return 0
         ;;
@@ -116,6 +122,12 @@ DHELP
         ;;
       --title)
         title="${2:-}"; shift 2 || true
+        ;;
+      --type)
+        type="${2:-}"; shift 2 || true
+        ;;
+      --packet)
+        packet=1; shift
         ;;
       --)
         shift
@@ -140,7 +152,7 @@ DHELP
     return 1
   fi
 
-  if [ -z "$prompt" ] && [ -z "$prompt_file" ] && [ ! -t 0 ]; then
+  if [ -z "$packet" ] && [ -z "$prompt" ] && [ -z "$prompt_file" ] && [ ! -t 0 ]; then
     prompt="$(cat)"
   fi
 
@@ -149,7 +161,10 @@ DHELP
   queued_by="$(scutil --get ComputerName 2>/dev/null || hostname)"
   part=".${name}.$$.part"
 
-  if [ -n "$prompt_file" ]; then
+  if [ -n "$packet" ]; then
+    job_body="$(printf 'PLAN=%q\nBASE=%q\nPACKET=%q\nTITLE=%q\nQUEUED_AT=%q\nQUEUED_BY=%q\n' \
+      "$name" "$base" "1" "$title" "$queued_at" "$queued_by")"
+  elif [ -n "$prompt_file" ]; then
     job_body="$(printf 'PLAN=%q\nBASE=%q\nPROMPT_FILE=%q\nTITLE=%q\nQUEUED_AT=%q\nQUEUED_BY=%q\n' \
       "$name" "$base" "$prompt_file" "$title" "$queued_at" "$queued_by")"
   elif [ -n "$prompt" ]; then
@@ -165,8 +180,20 @@ DHELP
         "$name" "$base" "$prompt" "$title" "$queued_at" "$queued_by")"
     fi
   else
-    echo "Need a prompt: pipe PROMPT=…, or --prompt, or --prompt-file" >&2
-    return 1
+    # No prompt given → SAS packet mode: the host runs plan:packet for PLAN.
+    job_body="$(printf 'PLAN=%q\nBASE=%q\nPACKET=%q\nTITLE=%q\nQUEUED_AT=%q\nQUEUED_BY=%q\n' \
+      "$name" "$base" "1" "$title" "$queued_at" "$queued_by")"
+  fi
+
+  # Optional conventional-commit type (branch prefix + title). Runner defaults to
+  # chore; append here so the job overrides it. Sourced as shell → last write wins.
+  [ -n "$type" ] && job_body+=$'\n'"TYPE=$(printf %q "$type")"
+
+  # auto-wake: if the host is asleep, Wake-on-LAN it before queuing (pairs with
+  # sleep --when-idle so the runner can nap between batches and come back on demand).
+  if ! ssh -o ConnectTimeout=4 -o BatchMode=yes "$HOST" 'true' 2>/dev/null; then
+    echo "${HOST} is asleep — waking before queue..."
+    cmd_wake || { echo "auto-wake failed (check QAI_MAC / WoL); not queued" >&2; return 1; }
   fi
 
   ssh_batch "mkdir -p $RUNNER_ROOT/queue && cat > $RUNNER_ROOT/queue/${part} && mv $RUNNER_ROOT/queue/${part} $RUNNER_ROOT/queue/${name}.job" <<<"$job_body"
@@ -294,17 +321,19 @@ PY
 }
 
 cmd_sleep() {
-  local force=0 keep_mask=0 setup=0 interactive=0
+  local force=0 keep_mask=0 setup=0 interactive=0 when_idle=0
   for arg in "$@"; do
     case "$arg" in
       --force|-f) force=1 ;;
       --keep-mask) keep_mask=1 ;;
       --setup|--allow-passwordless) setup=1 ;;
       --interactive|-i) interactive=1 ;;
+      --when-idle) when_idle=1 ;;
       -h|--help)
         cat <<'SHELP'
 Usage: qai sleep [options]
   --setup         install polkit rule for passwordless remote suspend
+  --when-idle     arm: the runner suspends the host after it drains the queue
   --force         sleep even if runner has jobs
   --keep-mask     do not unmask suspend.target
   --interactive   ssh -t + systemctl suspend
@@ -319,17 +348,21 @@ SHELP
     return 1
   fi
 
+  if [ "$when_idle" -eq 1 ]; then
+    ssh_batch 'touch ~/queue-ai/sleep-when-idle' || return 1
+    echo "armed: $HOST will suspend after the runner drains its queue."
+    echo "(needs passwordless suspend — run 'qai sleep --setup' once if it doesn't sleep)"
+    return 0
+  fi
+
   if [ "$setup" -eq 1 ]; then
     echo "Installing polkit passwordless-suspend rule on $HOST..."
-    ssh_tty 'bash -s' <<'REMOTE'
-set -euo pipefail
-USER_NAME="$(id -un)"
-RULE="/etc/polkit-1/rules.d/49-qai-runner-suspend.rules"
-TMP="$(mktemp)"
-cat >"$TMP" <<EOF
-// queue-ai — allow ${USER_NAME} suspend/hibernate without interactive polkit
+    local user_name rule_b64
+    user_name="$(ssh_batch 'id -un')" || { echo "cannot resolve remote user" >&2; return 1; }
+    rule_b64="$(cat <<EOF | base64 | tr -d '\n'
+// queue-ai — allow ${user_name} suspend/hibernate without interactive polkit
 polkit.addRule(function(action, subject) {
-    if (subject.user !== "${USER_NAME}") return;
+    if (subject.user !== "${user_name}") return;
     var ids = [
         "org.freedesktop.login1.suspend",
         "org.freedesktop.login1.suspend-multiple-sessions",
@@ -339,12 +372,11 @@ polkit.addRule(function(action, subject) {
     if (ids.indexOf(action.id) >= 0) return polkit.Result.YES;
 });
 EOF
-sudo install -m 644 "$TMP" "$RULE"
-rm -f "$TMP"
-sudo systemctl reload polkit 2>/dev/null || true
-busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanSuspend
-echo "Done. Try: qai sleep"
-REMOTE
+)"
+    # Embed the rule as base64 in the remote command (NOT via ssh stdin) so `ssh -t`
+    # keeps the local terminal as the PTY and sudo can prompt for the password.
+    # Piping a heredoc into ssh stdin defeats -t → the "terminal is required" bug.
+    ssh -t "$HOST" "printf %s '${rule_b64}' | base64 -d | sudo tee /etc/polkit-1/rules.d/49-qai-runner-suspend.rules >/dev/null && sudo systemctl reload polkit 2>/dev/null; echo 'Done — try: qai sleep --when-idle'"
     return 0
   fi
 
