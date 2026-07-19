@@ -112,10 +112,18 @@ usage_markdown() {
       if (!fs.existsSync(p)) return null;
       try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
     }
+    function primaryModel(mu) {
+      const keys = Object.keys(mu || {});
+      if (!keys.length) return null;
+      // The model with the most output tokens is the actual worker; the tiny
+      // internal Haiku housekeeping calls Claude Code makes (~20 out tok) must
+      // not win the label.
+      return keys.reduce((a, b) => ((mu[b].outputTokens ?? 0) > (mu[a].outputTokens ?? 0) ? b : a));
+    }
     function row(label, j) {
       if (!j) return `| ${label} | — | — | — | — | — |`;
       const u = j.usage || {};
-      const model = Object.keys(j.modelUsage || {})[0] || "?";
+      const model = primaryModel(j.modelUsage) || "?";
       const wallMin = (typeof j.duration_ms === "number")
         ? (j.duration_ms / 60000).toFixed(2) : "?";
       const cost = (typeof j.total_cost_usd === "number")
@@ -157,13 +165,21 @@ append_ledger() {
       if (!fs.existsSync(p)) return null;
       try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
     }
+    function primaryModel(mu) {
+      const keys = Object.keys(mu || {});
+      if (!keys.length) return null;
+      // The model with the most output tokens is the actual worker; the tiny
+      // internal Haiku housekeeping calls Claude Code makes (~20 out tok) must
+      // not win the label.
+      return keys.reduce((a, b) => ((mu[b].outputTokens ?? 0) > (mu[a].outputTokens ?? 0) ? b : a));
+    }
     function slice(j, role) {
       if (!j) return null;
       const u = j.usage || {};
       const models = j.modelUsage || {};
       return {
         role,
-        model: Object.keys(models)[0] || null,
+        model: primaryModel(models),
         duration_ms: j.duration_ms ?? null,
         duration_api_ms: j.duration_api_ms ?? null,
         wall_min: typeof j.duration_ms === "number" ? Math.round(j.duration_ms / 600) / 100 : null,
