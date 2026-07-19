@@ -36,7 +36,8 @@ Power
 
 Runner
   dispatch <name> [base]   Queue a job (PROMPT via stdin or flags)
-  status                   Queue / service / last log / usage tail
+  status [--watch [secs]]  Queue / phase / service / last log / usage tail
+                           --watch: live-refreshing display (Ctrl-C to stop)
   logs                     Follow newest runner log (Ctrl-C to stop)
   usage [--sum|--all]      Efficiency ledger (minutes + API-est $)
 
@@ -84,7 +85,39 @@ cmd_ssh() {
 }
 
 cmd_status() {
-  ssh_batch "bash $RUNNER_ROOT/bin/status.sh"
+  local watch=0 interval=3
+  local -a passthru=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -w|--watch)
+        watch=1; shift
+        if [[ "${1:-}" =~ ^[0-9]+$ ]]; then interval="$1"; shift; fi
+        ;;
+      --no-color) passthru+=(--no-color); shift ;;
+      -h|--help)
+        echo "Usage: qai status [--watch [secs]] [--no-color]"
+        echo "  --watch [secs]  live-refreshing display (default 3s; Ctrl-C to stop)"
+        return 0
+        ;;
+      *) passthru+=("$1"); shift ;;
+    esac
+  done
+
+  # qai owns the local terminal; disable remote color when our stdout isn't a tty.
+  # Forward COLUMNS so the remote layout matches our terminal width (batch SSH has
+  # no remote tty for `tput cols`).
+  local color_env="" cols
+  [ -t 1 ] || color_env="NO_COLOR=1 "
+  cols="$(tput cols 2>/dev/null || echo 80)"
+  local args="${passthru[*]:-}"
+
+  if [ "$watch" -eq 1 ]; then
+    # One persistent SSH; the remote loop clears + redraws so we don't reconnect
+    # every tick.
+    ssh_tty "while true; do clear; COLUMNS=${cols} ${color_env}bash $RUNNER_ROOT/bin/status.sh ${args}; printf '\n\033[2m  ↻ every ${interval}s — Ctrl-C to stop\033[0m\n'; sleep ${interval}; done"
+  else
+    ssh_batch "COLUMNS=${cols} ${color_env}bash $RUNNER_ROOT/bin/status.sh ${args}"
+  fi
 }
 
 cmd_logs() {
