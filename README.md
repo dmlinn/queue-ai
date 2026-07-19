@@ -93,7 +93,8 @@ qai dispatch fix-typos main --type fix --prompt 'Fix typos in README.md only.'
 Watch:
 
 ```bash
-qai status
+qai status            # colorized snapshot: current phase (dev vs review), queue, log, usage
+qai status --watch    # live-refreshing display (Ctrl-C to stop)
 qai logs
 qai usage --sum
 ```
